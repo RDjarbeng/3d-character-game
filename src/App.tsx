@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { Character, characterList } from './components/Character';
 import { Environment } from './components/Environment';
 import { Controls } from './components/Controls';
-import { ChevronLeft, ChevronRight, Trophy, Timer, Crown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Trophy, Timer, Crown, Bot } from 'lucide-react';
 
 function LoadingScreen() {
   return (
@@ -66,7 +66,8 @@ function App() {
   const [startTime] = useState(Date.now());
   const [endTime, setEndTime] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const [showCharacterSelect, setShowCharacterSelect] = useState(true);
+  const [showCharacterSelect, setShowCharacterSelect] = useState(false);
+  const [isAIPlaying, setIsAIPlaying] = useState(false);
   const [highScores, setHighScores] = useState<Record<number, HighScore>>(() => {
     const saved = localStorage.getItem('highScores');
     return saved ? JSON.parse(saved) : {};
@@ -161,6 +162,16 @@ function App() {
         {showCharacterSelect ? '↑' : '↓'}
       </button>
 
+      {/* AI Control Toggle */}
+      <button
+        onClick={() => setIsAIPlaying(prev => !prev)}
+        className="absolute top-4 right-16 z-20 bg-black/50 backdrop-blur-sm rounded-full p-2 text-white hover:bg-white/10 transition-colors"
+        aria-label="Toggle AI control"
+        disabled={gameCompleted}
+      >
+        <Bot className={isAIPlaying ? "text-green-400" : "text-white"} size={24} />
+      </button>
+
       {/* Score and Timer Display */}
       <div className="absolute top-4 left-4 z-10">
         <div className="space-y-2">
@@ -212,6 +223,7 @@ function App() {
               index={selectedCharacter}
               position={[0, 0, 0]}
               onPillarDestroyed={handlePillarDestroyed}
+              isAI={isAIPlaying}
             />
             <Environment
               destroyedPillars={destroyedPillars}

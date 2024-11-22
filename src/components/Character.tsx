@@ -1,7 +1,8 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Box, Sphere } from '@react-three/drei';
 import * as THREE from 'three';
+import { QAgent } from '../ai/QAgent';
 
 const characters = [
   {
@@ -44,9 +45,10 @@ interface CharacterProps {
   index: number;
   position: [number, number, number];
   onPillarDestroyed: (position: [number, number, number]) => void;
+  isAI?: boolean;
 }
 
-export function Character({ index, position: initialPosition, onPillarDestroyed }: CharacterProps) {
+export function Character({ index, position: initialPosition, onPillarDestroyed, isAI = false }: CharacterProps) {
   const groupRef = useRef<THREE.Group | THREE.Mesh>();
   const positionRef = useRef<[number, number, number]>([...initialPosition]);
   const velocityRef = useRef<[number, number, number]>([0, 0, 0]);
@@ -54,6 +56,9 @@ export function Character({ index, position: initialPosition, onPillarDestroyed 
   const SelectedCharacter = characters[index].Component;
   const characterRadius = characters[index].radius;
   const characterSpeed = characters[index].speed;
+  const [agent] = useState(() => new QAgent());
+  const lastPositionRef = useRef<[number, number, number]>([...initialPosition]);
+  const lastActionRef = useRef<string>('none');
 
   useEffect(() => {
     if (groupRef.current) {
@@ -64,51 +69,94 @@ export function Character({ index, position: initialPosition, onPillarDestroyed 
   }, [index]);
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      switch (event.key) {
-        case 'ArrowUp':
-          velocityRef.current[2] = -characterSpeed;
-          if (index === 0) rotationRef.current = Math.PI;
-          break;
-        case 'ArrowDown':
-          velocityRef.current[2] = characterSpeed;
-          if (index === 0) rotationRef.current = 0;
-          break;
-        case 'ArrowLeft':
-          velocityRef.current[0] = -characterSpeed;
-          if (index === 0) rotationRef.current = -Math.PI / 2;
-          break;
-        case 'ArrowRight':
-          velocityRef.current[0] = characterSpeed;
-          if (index === 0) rotationRef.current = Math.PI / 2;
-          break;
-      }
-    };
+    if (!isAI) {
+      const handleKeyDown = (event: KeyboardEvent) => {
+        switch (event.key) {
+          case 'ArrowUp':
+            velocityRef.current[2] = -characterSpeed;
+            if (index === 0) rotationRef.current = Math.PI;
+            break;
+          case 'ArrowDown':
+            velocityRef.current[2] = characterSpeed;
+            if (index === 0) rotationRef.current = 0;
+            break;
+          case 'ArrowLeft':
+            velocityRef.current[0] = -characterSpeed;
+            if (index === 0) rotationRef.current = -Math.PI / 2;
+            break;
+          case 'ArrowRight':
+            velocityRef.current[0] = characterSpeed;
+            if (index === 0) rotationRef.current = Math.PI / 2;
+            break;
+        }
+      };
 
-    const handleKeyUp = (event: KeyboardEvent) => {
-      switch (event.key) {
-        case 'ArrowUp':
-        case 'ArrowDown':
-          velocityRef.current[2] = 0;
-          break;
-        case 'ArrowLeft':
-        case 'ArrowRight':
-          velocityRef.current[0] = 0;
-          break;
-      }
-    };
+      const handleKeyUp = (event: KeyboardEvent) => {
+        switch (event.key) {
+          case 'ArrowUp':
+          case 'ArrowDown':
+            velocityRef.current[2] = 0;
+            break;
+          case 'ArrowLeft':
+          case 'ArrowRight':
+            velocityRef.current[0] = 0;
+            break;
+        }
+      };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+      window.addEventListener('keydown', handleKeyDown);
+      window.addEventListener('keyup', handleKeyUp);
 
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [index, characterSpeed]);
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        window.removeEventListener('keyup', handleKeyUp);
+      };
+    }
+  }, [index, characterSpeed, isAI]);
 
   useFrame(() => {
     if (groupRef.current) {
+      if (isAI) {
+        // Get remaining pillars
+        const pillars = getPillarPositions();
+        
+        // Choose action based on current state
+        const action = agent.chooseAction(positionRef.current, pillars);
+        
+        // Apply action
+        velocityRef.current = [0, 0, 0];
+        switch (action) {
+          case 'up':
+            velocityRef.current[2] = -characterSpeed;
+            break;
+          case 'down':
+            velocityRef.current[2] = characterSpeed;
+            break;
+          case 'left':
+            velocityRef.current[0] = -characterSpeed;
+            break;
+          case 'right':
+            velocityRef.current[0] = characterSpeed;
+            break;
+        }
+
+        // Calculate reward based on pillar destruction and movement
+        const reward = calculateReward(positionRef.current, pillars);
+        
+        // Learn from the previous action
+        agent.learn(
+          lastPositionRef.current,
+          lastActionRef.current,
+          reward,
+          positionRef.current,
+          pillars
+        );
+
+        // Update references for next frame
+        lastPositionRef.current = [...positionRef.current];
+        lastActionRef.current = action;
+      }
+
       const nextPosition = [
         positionRef.current[0] + velocityRef.current[0],
         positionRef.current[1],
@@ -122,7 +170,7 @@ export function Character({ index, position: initialPosition, onPillarDestroyed 
         const dz = nextPosition[2] - pillar[2];
         const distance = Math.sqrt(dx * dx + dz * dz);
         
-        if (distance < (characterRadius + 0.3)) { // Increased collision radius
+        if (distance < (characterRadius + 0.3)) {
           onPillarDestroyed(pillar);
         }
       }
@@ -173,6 +221,32 @@ function getPillarPositions(): [number, number, number][] {
     positions.push([x, 0.75, z]);
   }
   return positions;
+}
+
+function calculateReward(position: [number, number, number], pillars: [number, number, number][]): number {
+  let reward = -0.1; // Small negative reward for each step to encourage efficiency
+
+  // Find distance to nearest pillar
+  let minDist = Infinity;
+  for (const pillar of pillars) {
+    const dist = Math.sqrt(
+      Math.pow(position[0] - pillar[0], 2) + 
+      Math.pow(position[2] - pillar[2], 2)
+    );
+    minDist = Math.min(minDist, dist);
+  }
+
+  // Reward for being close to pillars
+  if (minDist < 1) {
+    reward += (1 - minDist) * 0.5;
+  }
+
+  // Penalty for being at the bounds
+  if (Math.abs(position[0]) > 3.5 || Math.abs(position[2]) > 3.5) {
+    reward -= 0.2;
+  }
+
+  return reward;
 }
 
 export const characterList = characters;
