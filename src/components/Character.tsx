@@ -115,94 +115,75 @@ export function Character({ index, position: initialPosition, onPillarDestroyed,
   }, [index, characterSpeed, isAI]);
 
   useFrame(() => {
-    if (groupRef.current) {
-      if (isAI) {
-        // Get remaining pillars
-        const pillars = getPillarPositions();
-        
-        // Choose action based on current state
-        const action = agent.chooseAction(positionRef.current, pillars);
-        
-        // Apply action
-        velocityRef.current = [0, 0, 0];
-        switch (action) {
-          case 'up':
-            velocityRef.current[2] = -characterSpeed;
-            break;
-          case 'down':
-            velocityRef.current[2] = characterSpeed;
-            break;
-          case 'left':
-            velocityRef.current[0] = -characterSpeed;
-            break;
-          case 'right':
-            velocityRef.current[0] = characterSpeed;
-            break;
-        }
-
-        // Calculate reward based on pillar destruction and movement
-        const reward = calculateReward(positionRef.current, pillars);
-        
-        // Learn from the previous action
-        agent.learn(
-          lastPositionRef.current,
-          lastActionRef.current,
-          reward,
-          positionRef.current,
-          pillars
-        );
-
-        // Update references for next frame
-        lastPositionRef.current = [...positionRef.current];
-        lastActionRef.current = action;
+    if (groupRef.current && isAI) {
+      const pillars = getPillarPositions();
+  
+      // Choose action based on current state
+      const action = agent.chooseAction(positionRef.current, pillars);
+      console.log("Chosen action:", action);
+  
+      // Reset velocity
+      velocityRef.current = [0, 0, 0];
+  
+      // Apply action
+      switch (action) {
+        case "up":
+          velocityRef.current[2] = -characterSpeed;
+          break;
+        case "down":
+          velocityRef.current[2] = characterSpeed;
+          break;
+        case "left":
+          velocityRef.current[0] = -characterSpeed;
+          break;
+        case "right":
+          velocityRef.current[0] = characterSpeed;
+          break;
+        default:
+          break;
       }
-
+  
+      console.log("Velocity:", velocityRef.current);
+  
       const nextPosition = [
         positionRef.current[0] + velocityRef.current[0],
         positionRef.current[1],
-        positionRef.current[2] + velocityRef.current[2]
+        positionRef.current[2] + velocityRef.current[2],
       ] as [number, number, number];
-
-      // Check collisions with pillars
-      const pillars = getPillarPositions();
-      for (const pillar of pillars) {
-        const dx = nextPosition[0] - pillar[0];
-        const dz = nextPosition[2] - pillar[2];
-        const distance = Math.sqrt(dx * dx + dz * dz);
-        
-        if (distance < (characterRadius + 0.3)) {
-          onPillarDestroyed(pillar);
-        }
-      }
-
-      // Update position with bounds checking
+  
+      // Calculate reward
+      const reward = calculateReward(
+        nextPosition,
+        lastPositionRef.current,
+        pillars
+      );
+      console.log("Reward:", reward);
+  
+      // Learn from previous state-action pair
+      agent.learn(
+        lastPositionRef.current,
+        lastActionRef.current,
+        reward,
+        nextPosition,
+        pillars
+      );
+  
+      // Update references for next frame
+      lastPositionRef.current = [...nextPosition];
+      lastActionRef.current = action;
+  
       positionRef.current = [
-        Math.max(-4, Math.min(4, nextPosition[0])),
-        nextPosition[1],
-        Math.max(-4, Math.min(4, nextPosition[2]))
+        Math.max(-4, Math.min(4, nextPosition[0])), // X-axis bounds
+        nextPosition[1], // Y-axis remains unchanged
+        Math.max(-4, Math.min(4, nextPosition[2])), // Z-axis bounds
       ];
-
       groupRef.current.position.set(...positionRef.current);
-
-      if (index === 1) {
-        const rollSpeed = 2;
-        if (velocityRef.current[2] !== 0) {
-          groupRef.current.rotation.x -= velocityRef.current[2] * rollSpeed;
-        }
-        if (velocityRef.current[0] !== 0) {
-          groupRef.current.rotation.z -= velocityRef.current[0] * rollSpeed;
-        }
-      } else {
-        const currentRotation = groupRef.current.rotation.y;
-        const targetRotation = rotationRef.current;
-        const rotationDiff = targetRotation - currentRotation;
-        
-        if (Math.abs(rotationDiff) > 0.01) {
-          groupRef.current.rotation.y += rotationDiff * 0.1;
-        }
-      }
     }
   });
+  
+  
+  
+  
 
   return (
     <group ref={groupRef as any}>
@@ -223,30 +204,64 @@ function getPillarPositions(): [number, number, number][] {
   return positions;
 }
 
-function calculateReward(position: [number, number, number], pillars: [number, number, number][]): number {
-  let reward = -0.1; // Small negative reward for each step to encourage efficiency
+function calculateReward(
+  position: [number, number, number],
+  lastPosition: [number, number, number],
+  pillars: [number, number, number][]
+): number {
+  let reward = -0.1; // Small penalty for each step to encourage efficiency
 
-  // Find distance to nearest pillar
+  // Penalize staying in the same place
+  if (
+    Math.abs(position[0] - lastPosition[0]) < 0.01 &&
+    Math.abs(position[2] - lastPosition[2]) < 0.01
+  ) {
+    reward -= 0.5; // Larger penalty for no movement
+    console.log("Penalty for no movement");
+  }
+
+  // Check if colliding with any pillar
+  for (const pillar of pillars) {
+    const dx = position[0] - pillar[0];
+    const dz = position[2] - pillar[2];
+    const distance = Math.sqrt(dx * dx + dz * dz);
+
+    if (distance < 0.5) { // Collision threshold
+      reward += 10; // Large reward for destroying a pillar
+      console.log("High reward for colliding with pillar");
+      return reward; // Exit early since we collided
+    }
+  }
+
+  // Reward or penalize based on distance to nearest pillar
   let minDist = Infinity;
+  let lastMinDist = Infinity;
+
   for (const pillar of pillars) {
     const dist = Math.sqrt(
-      Math.pow(position[0] - pillar[0], 2) + 
+      Math.pow(position[0] - pillar[0], 2) +
       Math.pow(position[2] - pillar[2], 2)
     );
+    const lastDist = Math.sqrt(
+      Math.pow(lastPosition[0] - pillar[0], 2) +
+      Math.pow(lastPosition[2] - pillar[2], 2)
+    );
     minDist = Math.min(minDist, dist);
+    lastMinDist = Math.min(lastMinDist, lastDist);
   }
 
-  // Reward for being close to pillars
-  if (minDist < 1) {
-    reward += (1 - minDist) * 0.5;
+  if (minDist < lastMinDist) {
+    reward += 1; // Reward for moving closer to the nearest pillar
+    console.log("Reward for moving closer to pillar");
+  } else if (minDist > lastMinDist) {
+    reward -= 0.5; // Penalty for moving farther away
+    console.log("Penalty for moving farther from pillar");
   }
 
-  // Penalty for being at the bounds
-  if (Math.abs(position[0]) > 3.5 || Math.abs(position[2]) > 3.5) {
-    reward -= 0.2;
-  }
-
+  console.log("Final Reward:", reward);
   return reward;
 }
+
+
 
 export const characterList = characters;
