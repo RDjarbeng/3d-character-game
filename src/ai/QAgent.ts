@@ -7,6 +7,7 @@ interface PerformanceMetrics {
   completionTime: number;
 }
 
+let agent_epsilon=0.5
 export class QAgent {
   private qTable: Map<string, Map<string, number>>;
   private learningRate: number;
@@ -21,7 +22,7 @@ export class QAgent {
     this.qTable = new Map();
     this.learningRate = 0.1;
     this.discountFactor = 0.9;
-    this.epsilon = 0.1;
+    this.epsilon = agent_epsilon;
     this.actions = ['up', 'down', 'left', 'right', 'none'];
     this.metrics = [];
     this.episodeCount = 0;
@@ -31,6 +32,33 @@ export class QAgent {
     this.loadProgress();
   }
 
+  getMovingAverageMetrics(windowSize: number = 10) {
+    const recentMetrics = this.metrics.slice(-windowSize);
+    const averageReward = recentMetrics.reduce((sum, m) => sum + m.episodeReward, 0) / recentMetrics.length;
+    const averageSteps = recentMetrics.reduce((sum, m) => sum + m.episodeSteps, 0) / recentMetrics.length;
+    const averageTime = recentMetrics.reduce((sum, m) => sum + m.completionTime, 0) / recentMetrics.length;
+    const averagePillars = recentMetrics.reduce((sum, m) => sum + m.pillarsDestroyed, 0) / recentMetrics.length;
+  
+    return { averageReward, averageSteps, averageTime, averagePillars };
+  }
+  
+  private hasPerformancePlateau(windowSize: number = 10, threshold: number = 0.01): boolean {
+    if (this.metrics.length < windowSize * 2) {
+      // Not enough data to detect a plateau
+      return false;
+    }
+  
+    // Calculate moving averages for two consecutive windows
+    const recentMetrics = this.metrics.slice(-windowSize);
+    const previousMetrics = this.metrics.slice(-windowSize * 2, -windowSize);
+  
+    const recentAverageReward = recentMetrics.reduce((sum, m) => sum + m.episodeReward, 0) / recentMetrics.length;
+    const previousAverageReward = previousMetrics.reduce((sum, m) => sum + m.episodeReward, 0) / previousMetrics.length;
+  
+    // Check if the improvement is below the threshold
+    return Math.abs(recentAverageReward - previousAverageReward) < threshold;
+  }
+  
   private initializeEpisodeMetrics(): PerformanceMetrics {
     return {
       episodeReward: 0,
@@ -46,7 +74,9 @@ export class QAgent {
     
     let nearestPillar: [number, number, number] | null = null;
     let minDist = Infinity;
-    
+  
+    console.log("Available pillars for state calculation:", pillars);
+  
     for (const pillar of pillars) {
       const dist = Math.sqrt(
         Math.pow(position[0] - pillar[0], 2) + 
@@ -57,11 +87,14 @@ export class QAgent {
         nearestPillar = pillar;
       }
     }
-
+  
+    console.log('Nearest pillar:', nearestPillar);
+  
     return nearestPillar 
       ? `${x},${z}:${nearestPillar[0]},${nearestPillar[2]}` 
       : `${x},${z}:none`;
   }
+  
 
   private getQValue(state: string, action: string): number {
     if (!this.qTable.has(state)) {
@@ -83,17 +116,21 @@ export class QAgent {
 
   chooseAction(position: [number, number, number], pillars: [number, number, number][]): string {
     const state = this.getState(position, pillars);
-
-    // Gradually reduce exploration as the agent learns
-    const currentEpsilon = this.epsilon * Math.max(0.1, 1 - this.episodeCount / 1000);
-
-    if (Math.random() < currentEpsilon) {
-      return this.actions[Math.floor(Math.random() * this.actions.length)];
+  
+    // Slow down epsilon decay and set a minimum threshold
+    this.epsilon = Math.max(0.2, this.epsilon * (1 - this.episodeCount / 10000)); // Minimum epsilon = 0.2
+  
+    // console.log("Current epsilon:", this.epsilon);
+  
+    if (Math.random() < this.epsilon) {
+      const randomAction = this.actions[Math.floor(Math.random() * this.actions.length)];
+      console.log("Exploring with random action:", randomAction);
+      return randomAction;
     }
-
+  
     let bestAction = 'none';
     let bestValue = -Infinity;
-
+  
     for (const action of this.actions) {
       const value = this.getQValue(state, action);
       if (value > bestValue) {
@@ -101,9 +138,12 @@ export class QAgent {
         bestAction = action;
       }
     }
-
+  
+    console.log("Exploiting with best action:", bestAction);
     return bestAction;
   }
+  
+  
 
   learn(
     oldState: [number, number, number],
@@ -137,9 +177,10 @@ export class QAgent {
     this.setQValue(oldStateStr, action, newQ);
 
     // Save progress periodically
-    if (this.currentEpisode.episodeSteps % 100 === 0) {
+    if (this.currentEpisode.episodeSteps % 100 === 0 || this.episodeCount % 10 === 0) {
       this.saveProgress();
     }
+    
   }
 
   completeEpisode(success: boolean, timeElapsed: number) {
@@ -157,6 +198,7 @@ export class QAgent {
   }
 
   getPerformanceMetrics() {
+    // console.log('Performance metrics called');
     if (this.metrics.length === 0) return null;
 
     const last10Episodes = this.metrics.slice(-10);
@@ -169,21 +211,26 @@ export class QAgent {
       averageReward,
       averageSteps,
       averageTime,
-      epsilon: this.epsilon * Math.max(0.1, 1 - this.episodeCount / 1000)
+      epsilon: this.epsilon
     };
   }
 
   private saveProgress() {
-    const data = {
-      qTable: Array.from(this.qTable.entries()).map(([state, actions]) => [
-        state,
-        Array.from(actions.entries())
-      ]),
-      metrics: this.metrics,
-      episodeCount: this.episodeCount
-    };
-    saveToLocalStorage('qagent_progress', data);
+    try {
+      const data = {
+        qTable: Array.from(this.qTable.entries()).map(([state, actions]) => [
+          state,
+          Array.from(actions.entries())
+        ]),
+        metrics: this.metrics,
+        episodeCount: this.episodeCount
+      };
+      saveToLocalStorage('qagent_progress', data);
+    } catch (error) {
+      console.error("Failed to save progress:", error);
+    }
   }
+  
 
   private loadProgress() {
     const data = loadFromLocalStorage('qagent_progress');
