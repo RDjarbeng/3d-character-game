@@ -1,3 +1,16 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.stats-panel {
+    position: absolute;
+    top: 10px; /* Move it to the top for visibility */
+  left: 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 10px;
+    border-radius: 8px;
+    z-index: 100; /* Ensure it appears above other elements */
+  border: 2px solid red; /* Debugging border */
+  }
+  

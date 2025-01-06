@@ -4,6 +4,34 @@ import { Character, characterList } from './components/Character';
 import { Environment } from './components/Environment';
 import { Controls } from './components/Controls';
 import { ChevronLeft, ChevronRight, Trophy, Timer, Crown, Bot } from 'lucide-react';
+import { QAgent } from './ai/QAgent';
+
+function StatsPanel({ agent }: { agent: QAgent }) {
+  const metrics = agent.getPerformanceMetrics();
+
+  // console.log("Metrics:", metrics); // Debug log
+
+  if (!metrics) {
+    return (
+      <div className="stats-panel">
+        <p>No metrics available yet...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="stats-panel">
+      <p>Episodes: {metrics.episodeCount}</p>
+      <p>Average Reward: {metrics.averageReward.toFixed(2)}</p>
+      <p>Average Steps: {metrics.averageSteps.toFixed(2)}</p>
+      <p>Average Time: {metrics.averageTime.toFixed(2)}s</p>
+      <p>Epsilon (Exploration Rate): {metrics.epsilon.toFixed(2)}</p>
+    </div>
+  );
+}
+
+
+
 
 function LoadingScreen() {
   return (
@@ -72,25 +100,46 @@ function App() {
     const saved = localStorage.getItem('highScores');
     return saved ? JSON.parse(saved) : {};
   });
+  const agent = new QAgent();
 
   useEffect(() => {
-    if (!gameCompleted) {
-      const timer = setInterval(() => {
-        setCurrentTime(Date.now() - startTime);
-      }, 100);
-      return () => clearInterval(timer);
+    if (destroyedPillars.length === 8 && !endTime) {
+      const finalTime = Date.now() - startTime;
+      setEndTime(finalTime);
+      setGameCompleted(true);
+  
+      // Notify the QAgent that the episode is complete
+      agent.completeEpisode(true, finalTime);
+  
+      if (!highScores[selectedCharacter] || finalTime < highScores[selectedCharacter].time) {
+        const newHighScores = {
+          ...highScores,
+          [selectedCharacter]: { time: finalTime, character: characterList[selectedCharacter].name },
+        };
+        setHighScores(newHighScores);
+        localStorage.setItem('highScores', JSON.stringify(newHighScores));
+      }
     }
-  }, [startTime, gameCompleted]);
+  }, [destroyedPillars, endTime, startTime, selectedCharacter, highScores]);
+  
 
   const handlePillarDestroyed = useCallback((position: [number, number, number]) => {
-    if (!destroyedPillars.some(p => 
-      Math.abs(p[0] - position[0]) < 0.1 && 
+    console.log("Attempting to destroy pillar at:", position);
+  
+    // Check if the pillar is already in the destroyed list
+    if (!destroyedPillars.some(p =>
+      Math.abs(p[0] - position[0]) < 0.1 &&
       Math.abs(p[2] - position[2]) < 0.1
     )) {
       setDestroyedPillars(prev => [...prev, position]);
       setScore(prev => prev + 100);
+      console.log("Pillar added to destroyed list:", position);
+    } else {
+      console.warn("Pillar already destroyed:", position);
     }
   }, [destroyedPillars]);
+  
+
 
   useEffect(() => {
     if (destroyedPillars.length === 8 && !endTime) {
@@ -224,6 +273,7 @@ function App() {
               position={[0, 0, 0]}
               onPillarDestroyed={handlePillarDestroyed}
               isAI={isAIPlaying}
+              destroyedPillars={destroyedPillars} // Pass destroyed pillars
             />
             <Environment
               destroyedPillars={destroyedPillars}
@@ -245,6 +295,8 @@ function App() {
           </p>
         </div>
       </div>
+      <StatsPanel agent={agent} />
+
     </div>
   );
 }
