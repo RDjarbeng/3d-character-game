@@ -43,6 +43,7 @@ For updates and progress on this project, follow me on [X (formerly Twitter)](ht
 ## Acknowledgements
 
 This project was made with [bolt.new](https://bolt.new).
+Developer: <a href="https://rdjarbeng.com">Richard Djarbeng</a>
 
 ---
 
